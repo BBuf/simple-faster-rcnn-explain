@@ -110,6 +110,9 @@ class VGG16RoIHead(nn.Module):
         # NOTE: important: yx->xy
         xy_indices_and_rois = indices_and_rois[:, [0, 2, 1, 4, 3]]
         # 把tensor变成在内存中连续分布的形式
+        # contiguous：view只能用在contiguous的variable上。
+        # 如果在view之前用了transpose, permute等，需要用
+        # contiguous()来返回一个contiguous copy。 
         indices_and_rois =  xy_indices_and_rois.contiguous()
         # 接下来分析roi_module.py中的RoI（）
         pool = self.roi(x, indices_and_rois)

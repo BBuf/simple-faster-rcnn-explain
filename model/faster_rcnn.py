@@ -78,7 +78,19 @@ class FasterRCNN(nn.Module):
             self.score_thresh = 0.05
         else:
             raise ValueError('preset must be visualize or evaluate')
-
+    # predict函数是对网络RoIhead网络输出的预处理
+    # 函数_suppress将得到真正的预测结果。
+    # 此函数是一个按类别的循环，l从1至20（0类为背景类）。
+    # 即预测思想是按20个类别顺序依次验证，如果有满足该类的预测结果，
+    # 则记录，否则转入下一类（一张图中也就几个类别而已）。例如筛选
+    # 预测出第1类的结果，首先在cls_bbox中将所有128个预测第1类的
+    # bbox坐标找出，然后从prob中找出128个第1类的概率。因为阈值为0.7，
+    # 也即概率>0.7的所有边框初步被判定预测正确，记录下来。然而可能有
+    # 多个边框预测第1类中同一个物体，同类中一个物体只需一个边框，
+    # 所以需再经基于类的NMS后使得每类每个物体只有一个边框，至此
+    # 第1类预测完成，记录第1类的所有边框坐标、标签、置信度。
+    # 接着下一类...，直至20类都记录下来，那么一张图片（也即一个batch）
+    # 的预测也就结束了。
     def _suppress(self, raw_cls_bbox, raw_prob):
         bbox = list()
         label = list()
@@ -104,34 +116,9 @@ class FasterRCNN(nn.Module):
 
     @nograd
     def predict(self, imgs,sizes=None,visualize=False):
-        """Detect objects from images.
-
-        This method predicts objects for each image.
-
-        Args:
-            imgs (iterable of numpy.ndarray): Arrays holding images.
-                All images are in CHW and RGB format
-                and the range of their value is :math:`[0, 255]`.
-
-        Returns:
-           tuple of lists:
-           This method returns a tuple of three lists,
-           :obj:`(bboxes, labels, scores)`.
-
-           * **bboxes**: A list of float arrays of shape :math:`(R, 4)`, \
-               where :math:`R` is the number of bounding boxes in a image. \
-               Each bouding box is organized by \
-               :math:`(y_{min}, x_{min}, y_{max}, x_{max})` \
-               in the second axis.
-           * **labels** : A list of integer arrays of shape :math:`(R,)`. \
-               Each value indicates the class of the bounding box. \
-               Values are in range :math:`[0, L - 1]`, where :math:`L` is the \
-               number of the foreground classes.
-           * **scores** : A list of float arrays of shape :math:`(R,)`. \
-               Each value indicates how confident the prediction is.
-
-        """
+        # 设置为eval模式
         self.eval()
+        # 是否开启可视化
         if visualize:
             self.use_preset('visualize')
             prepared_imgs = list()
@@ -148,15 +135,24 @@ class FasterRCNN(nn.Module):
         scores = list()
         for img, size in zip(prepared_imgs, sizes):
             img = at.totensor(img[None]).float()
+            # 对读入的图片求尺度scale，因为输入的图像经预处理就会有缩放，
+            # 所以需记录缩放因子scale，这个缩放因子在ProposalCreator
+            # 筛选roi时有用到，即将所有候选框按这个缩放因子映射回原图，
+            # 超出原图边框的趋于将被截断。
             scale = img.shape[3] / size[1]
+            # 执行forward
             roi_cls_loc, roi_scores, rois, _ = self(img, scale=scale)
             # We are assuming that batch size is 1.
+
             roi_score = roi_scores.data
             roi_cls_loc = roi_cls_loc.data
             roi = at.totensor(rois) / scale
 
             # Convert predictions to bounding boxes in image coordinates.
             # Bounding boxes are scaled to the scale of the input images.
+            # 为ProposalCreator对loc做了归一化（-mean /std）处理，所以这里
+            # 需要再*std+mean，此时的位置参数loc为roi_cls_loc。然后将这128
+            # 个roi利用roi_cls_loc进行微调，得到新的cls_bbox。
             mean = t.Tensor(self.loc_normalize_mean).cuda(). \
                 repeat(self.n_class)[None]
             std = t.Tensor(self.loc_normalize_std).cuda(). \
@@ -172,7 +168,9 @@ class FasterRCNN(nn.Module):
             # clip bounding box
             cls_bbox[:, 0::2] = (cls_bbox[:, 0::2]).clamp(min=0, max=size[0])
             cls_bbox[:, 1::2] = (cls_bbox[:, 1::2]).clamp(min=0, max=size[1])
-
+            # 对于分类得分roi_scores，我们需要将其经过softmax后转为概率prob。
+            # 值得注意的是我们此时得到的是对所有输入128个roi以及位置参数、得分
+            # 的预处理，下面将筛选出最后最终的预测结果。
             prob = at.tonumpy(F.softmax(at.totensor(roi_score), dim=1))
 
             raw_cls_bbox = at.tonumpy(cls_bbox)
@@ -187,6 +185,8 @@ class FasterRCNN(nn.Module):
         self.train()
         return bboxes, labels, scores
 
+    # 定义了优化器optimizer，对于需要求导的参数 按照是否含bias赋予不同的学习率。
+    # 默认是使用SGD，可选Adam，不过需更小的学习率。
     def get_optimizer(self):
         """
         return optimizer, It could be overwriten if you want to specify 
