@@ -161,6 +161,7 @@ class FasterRCNN(nn.Module):
             roi_cls_loc = (roi_cls_loc * std + mean)
             roi_cls_loc = roi_cls_loc.view(-1, self.n_class, 4)
             roi = roi.view(-1, 1, 4).expand_as(roi_cls_loc)
+            # 解码过程
             cls_bbox = loc2bbox(at.tonumpy(roi).reshape((-1, 4)),
                                 at.tonumpy(roi_cls_loc).reshape((-1, 4)))
             cls_bbox = at.totensor(cls_bbox)
@@ -170,7 +171,7 @@ class FasterRCNN(nn.Module):
             cls_bbox[:, 1::2] = (cls_bbox[:, 1::2]).clamp(min=0, max=size[1])
             # 对于分类得分roi_scores，我们需要将其经过softmax后转为概率prob。
             # 值得注意的是我们此时得到的是对所有输入128个roi以及位置参数、得分
-            # 的预处理，下面将筛选出最后最终的预测结果。
+            # 的预处理，下面将筛选出最终的预测结果。
             prob = at.tonumpy(F.softmax(at.totensor(roi_score), dim=1))
 
             raw_cls_bbox = at.tonumpy(cls_bbox)
