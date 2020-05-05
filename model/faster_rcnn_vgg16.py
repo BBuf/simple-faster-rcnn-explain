@@ -104,6 +104,7 @@ class VGG16RoIHead(nn.Module):
     def forward(self, x, rois, roi_indices):
  
         # in case roi_indices is  ndarray
+        # 前面解释过这里的roi_indices其实是多余的，因为batch_size一直为1
         roi_indices = at.totensor(roi_indices).float() #ndarray->tensor
         rois = at.totensor(rois).float()
         indices_and_rois = t.cat([roi_indices[:, None], rois], dim=1)

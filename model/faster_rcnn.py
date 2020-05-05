@@ -138,7 +138,7 @@ class FasterRCNN(nn.Module):
             # 对读入的图片求尺度scale，因为输入的图像经预处理就会有缩放，
             # 所以需记录缩放因子scale，这个缩放因子在ProposalCreator
             # 筛选roi时有用到，即将所有候选框按这个缩放因子映射回原图，
-            # 超出原图边框的趋于将被截断。
+            # 超出原图边框的区域将被截断。
             scale = img.shape[3] / size[1]
             # 执行forward
             roi_cls_loc, roi_scores, rois, _ = self(img, scale=scale)
